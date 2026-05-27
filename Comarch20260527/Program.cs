@@ -1,91 +1,50 @@
-﻿// https://github.com/Lasoty/Comarch20260527
+﻿using System.Collections.Concurrent;
 
-using System.Diagnostics;
-
-const int WorkItems = 5000;
-
-Console.WriteLine($"Main thread: {Environment.CurrentManagedThreadId}.");
-Console.WriteLine();
-
-RunWithThreads();
-RunWithThreadPool();
-await RunWithTaskAsync();
-
-async Task RunWithTaskAsync()
+internal static class Program
 {
-    Console.WriteLine("=== Task.Run ===");
-    var stopwatch = Stopwatch.StartNew();
-    var tasks = new List<Task>();
+    private const int Iterations = 50_000;
 
-    for (int i = 0; i < WorkItems; i++)
+    public static async Task Main()
     {
-        var jobId = i;
-        tasks.Add(Task.Run(() => SimulatedWork(jobId, "Task.Run")));
+        Console.WriteLine($"Expected result: {Iterations}");
+        Console.WriteLine();
+
+        RunBrokenCounter();
+        RunWithLock();
+        RunWithInterlocked();
+        await RunWithSemaphoreSlimAsync();
+        RunWithConcurrentDictionary();
     }
 
-    await Task.WhenAll(tasks);
-    Console.WriteLine($"Task.Run finished in {stopwatch.ElapsedMilliseconds} ms");
-    Console.WriteLine();
-}
-
-
-void RunWithThreadPool()
-{
-    Console.WriteLine("=== Threadpool ===");
-    var stopwatch = Stopwatch.StartNew();
-    using var countdown = new CountdownEvent(WorkItems);
-
-    for (int i = 0; i < WorkItems; i++)
+    private static void RunBrokenCounter()
     {
-        var jobId = i;
-        ThreadPool.QueueUserWorkItem(_ =>
+        var counter = 0;
+
+        Parallel.For(0, Iterations, _ =>
         {
-            try
-            {
-                SimulatedWork(jobId, "ThreadPool");
-            }
-            finally
-            {
-                countdown.Signal();
-            }
+            counter++;
         });
+
+        Console.WriteLine($"Broken counter:             {counter}");
     }
 
-    countdown.Wait();
-    Console.WriteLine($"ThreadPool finished in {stopwatch.ElapsedMilliseconds} ms.");
-    Console.WriteLine();
-}
-
-
-void RunWithThreads()
-{
-    Console.WriteLine("=== Thread ===");
-    var stopwatch = Stopwatch.StartNew();
-    var threads = new List<Thread>();
-
-    for (int i = 0; i < WorkItems; i++)
+    private static void RunWithLock()
     {
-        var jobId = i;
-        var thread = new Thread(() =>
-        {
-            SimulatedWork(jobId, "Thread");
-        });
-        threads.Add(thread);
-        thread.Start();
+
     }
 
-    foreach (Thread thread in threads)
+    private static void RunWithInterlocked()
     {
-        thread.Join();
+
     }
 
-    Console.WriteLine($"Thread finished in {stopwatch.ElapsedMilliseconds} ms");
-    Console.WriteLine();
-}
+    private static async Task RunWithSemaphoreSlimAsync()
+    {
 
-void SimulatedWork(int jobId, string mechanism)
-{
-    Console.WriteLine($"{mechanism,-10} job {jobId,2} started on thread {Environment.CurrentManagedThreadId}");
-    Thread.Sleep(250);
-    Console.WriteLine($"{mechanism,-10} job {jobId,2} ended on thread {Environment.CurrentManagedThreadId}");
+    }
+
+    private static void RunWithConcurrentDictionary()
+    {
+
+    }
 }
