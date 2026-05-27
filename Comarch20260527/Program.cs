@@ -1,24 +1,23 @@
-﻿internal static class Program
+﻿using System.Collections.Concurrent;
+
+internal static class Program
 {
     public static void Main()
     {
         var events = GenerateEvents(20_000);
-        var counts = new Dictionary<string, int>();
+        var counts = new ConcurrentDictionary<string, int>();
         var errors = 0;
 
         Parallel.ForEach(events, logEvent =>
         {
-            // Ten kod jest celowo problematyczny.
-            if (!counts.ContainsKey(logEvent.Category))
-            {
-                counts[logEvent.Category] = 0;
-            }
-
-            counts[logEvent.Category]++;
+            counts.AddOrUpdate(
+                logEvent.Category,
+                addValue: 1,
+                updateValueFactory: (_, oldValue) => oldValue + 1);
 
             if (!logEvent.IsSuccess)
             {
-                errors++;
+                Interlocked.Increment(ref errors);
             }
         });
 
