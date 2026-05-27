@@ -1,86 +1,53 @@
-﻿using System.Collections.Concurrent;
-
-internal static class Program
+﻿internal static class Program
 {
-    private const int Iterations = 50_000;
-
-    public static async Task Main()
+    public static void Main()
     {
-        Console.WriteLine($"Expected result: {Iterations}");
-        Console.WriteLine();
+        var events = GenerateEvents(20_000);
+        var counts = new Dictionary<string, int>();
+        var errors = 0;
 
-        RunBrokenCounter();
-        RunWithLock();
-        RunWithInterlocked();
-        await RunWithSemaphoreSlimAsync();
-        RunWithConcurrentDictionary();
-    }
-
-    private static void RunBrokenCounter()
-    {
-        var counter = 0;
-
-        Parallel.For(0, Iterations, _ =>
+        Parallel.ForEach(events, logEvent =>
         {
-            counter++;
-        });
-
-        Console.WriteLine($"Broken counter:             {counter}");
-    }
-
-    private static void RunWithLock()
-    {
-        var counter = 0;
-        object sync = new();
-
-        Parallel.For(0, Iterations, _ =>
-        {
-            lock (sync)
+            // Ten kod jest celowo problematyczny.
+            if (!counts.ContainsKey(logEvent.Category))
             {
-                counter++;
+                counts[logEvent.Category] = 0;
+            }
+
+            counts[logEvent.Category]++;
+
+            if (!logEvent.IsSuccess)
+            {
+                errors++;
             }
         });
 
-        Console.WriteLine($"Counter with lock:             {counter}");
+        Console.WriteLine("Counts:");
+        foreach (var item in counts.OrderBy(x => x.Key))
+        {
+            Console.WriteLine($"{item.Key,-12}: {item.Value}");
+        }
+
+        Console.WriteLine($"Errors: {errors}");
+        Console.WriteLine($"Total counted: {counts.Values.Sum()}");
+        Console.WriteLine($"Expected: {events.Count}");
     }
 
-    private static void RunWithInterlocked()
+    private static List<LogEvent> GenerateEvents(int count)
     {
-        var counter = 0;
-        Parallel.For(0, Iterations, _ =>
-        {
-            Interlocked.Increment(ref counter);
-        });
-        Console.WriteLine($"Counter with Interlock:             {counter}");
-    }
+        var categories = new[] { "Orders", "Payments", "Invoices", "Users", "Reports" };
+        var random = new Random(123);
+        var result = new List<LogEvent>();
 
-    private static async Task RunWithSemaphoreSlimAsync()
-    {
-        var counter = 0;
-        using var semaphore = new SemaphoreSlim(1, 1);
-        var tasks = Enumerable.Range(0, Iterations).Select(async _ =>
+        for (var i = 0; i < count; i++)
         {
-            await semaphore.WaitAsync();
-            try
-            {
-                counter++;
-            }
-            finally
-            {
-                semaphore.Release();
-            }
-        });
-        await Task.WhenAll(tasks);
-        Console.WriteLine($"Counter with semaphoreSlim:             {counter}");
-    }
+            result.Add(new LogEvent(
+                Category: categories[random.Next(categories.Length)],
+                IsSuccess: random.NextDouble() > 0.15));
+        }
 
-    private static void RunWithConcurrentDictionary()
-    {
-        var dictionary = new ConcurrentDictionary<string, int>();
-        Parallel.For(0, Iterations, _ =>
-        {
-            dictionary.AddOrUpdate("counter", 1, (_, oldvalue) => oldvalue + 1);
-        });
-        Console.WriteLine($"Counter in dictionary:             {dictionary["counter"]}");
+        return result;
     }
 }
+
+internal sealed record LogEvent(string Category, bool IsSuccess);
