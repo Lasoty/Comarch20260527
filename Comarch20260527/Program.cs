@@ -34,22 +34,43 @@ internal static class Program
             ["Keyboard"] = 50
         };
 
+        var inventoryLock = new object();
+        using var concurrencyLimit = new SemaphoreSlim(8, 8);
+
         var orders = GenerateOrders(150);
         var accepted = 0;
         var rejected = 0;
 
         var tasks = orders.Select(async order =>
         {
-            await Task.Delay(Random.Shared.Next(5, 25));
+            await concurrencyLimit.WaitAsync();
+            try
+            {
+                await Task.Delay(Random.Shared.Next(5, 25));
 
-            if (inventory.TryGetValue(order.Product, out var quantity) && quantity > 0)
-            {
-                inventory[order.Product] = quantity - 1;
-                accepted++;
+                var wasAccepted = false;
+
+                lock (inventoryLock)
+                {
+                    if (inventory.TryGetValue(order.Product, out var quantity) && quantity > 0)
+                    {
+                        inventory[order.Product] = quantity - 1;
+                        wasAccepted = true;
+                    }
+                }
+
+                if (wasAccepted)
+                {
+                    Interlocked.Increment(ref accepted);
+                }
+                else
+                {
+                    Interlocked.Increment(ref rejected);
+                }
             }
-            else
+            finally
             {
-                rejected++;
+                concurrencyLimit.Release();
             }
         });
 
@@ -58,6 +79,7 @@ internal static class Program
         Console.WriteLine($"Accepted: {accepted}");
         Console.WriteLine($"Rejected: {rejected}");
         Console.WriteLine($"Total:    {accepted + rejected}");
+        Console.WriteLine($"Orders:   {orders.Count}");
         Console.WriteLine();
 
         Console.WriteLine("Inventory:");
@@ -70,8 +92,10 @@ internal static class Program
     private static List<Order> GenerateOrders(int count)
     {
         var products = new[] { "Laptop", "Monitor", "Keyboard" };
+        var random = new Random(123);
+
         return Enumerable.Range(1, count)
-            .Select(id => new Order(id, products[Random.Shared.Next(products.Length)]))
+            .Select(id => new Order(id, products[random.Next(products.Length)]))
             .ToList();
     }
 }
