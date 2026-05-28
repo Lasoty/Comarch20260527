@@ -8,6 +8,12 @@
  * Nie chcemy też czekać bez końca na najwolniejszą usługę.
  * W tym ćwiczeniu uczestnicy zaimplementują mechanizm, który odpytuje kilka źródeł,
  * przetwarza wyniki w kolejności zakończenia i tworzy raport.
+ *
+ * 1. Uruchomić wszystkie wywołania współbieżnie.
+   2. Dodać globalny timeout `3 sekundy`.
+   3. Przetwarzać wyniki w kolejności zakończenia.
+   4. Nie przerywać całego procesu przez błąd jednej usługi.
+   5. Wypisać raport: sukcesy, błędy i anulowania/timeouty.
  */
 
 
