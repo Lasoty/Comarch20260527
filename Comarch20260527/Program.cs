@@ -1,11 +1,13 @@
 ﻿/*
-    Refaktoryzacja kodu synchronicznego do async
-
-    **Cel:** Usunąć `.Result`, wprowadzić `async/await`, poprawne nazewnictwo i `CancellationToken`.
-
-    W wielu starszych projektach można spotkać kod, który wywołuje metodę asynchroniczną, ale blokuje się na wyniku przez `.Result` albo `.Wait()`. To jest antywzorzec sync-over-async. W aplikacjach webowych może prowadzić do blokowania wątków, a w aplikacjach UI lub starszym ASP.NET do deadlocków.
-
-    W tym ćwiczeniu uczestnicy przepiszą kod tak, aby asynchroniczność była propagowana przez cały stos wywołań.
+ * Wiele usług z timeoutem i raportem błędów
+ *
+ * **Cel:** Użyć `Task.WhenAny`, timeoutów i obsługi błędów częściowych. 
+ *
+ * W praktycznych aplikacjach często odpytywane jest kilka usług zewnętrznych.
+ * Nie chcemy, aby błąd jednej usługi zatrzymał cały proces.
+ * Nie chcemy też czekać bez końca na najwolniejszą usługę.
+ * W tym ćwiczeniu uczestnicy zaimplementują mechanizm, który odpytuje kilka źródeł,
+ * przetwarza wyniki w kolejności zakończenia i tworzy raport.
  */
 
 
@@ -13,56 +15,47 @@ internal static class Program
 {
     public static async Task Main()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var services = new[]
+        {
+            new ExternalService("Catalog", 700, false),
+            new ExternalService("Pricing", 1200, false),
+            new ExternalService("Availability", 2500, false),
+            new ExternalService("Recommendations", 800, true),
+            new ExternalService("Reviews", 3500, false)
+        };
 
-        var service = new CustomerReportService(new FakeCustomerClient());
-        var report = await service.BuildReportAsync(1, cts.Token);
-        Console.WriteLine(report);
+        Console.WriteLine("Starting calls...");
+
+        foreach (var service in services)
+        {
+            var result = await service.CallAsync(CancellationToken.None);
+            Console.WriteLine($"{service.Name}: {result}");
+        }
     }
 }
 
-internal sealed class CustomerReportService
+internal sealed class ExternalService
 {
-    private readonly FakeCustomerClient _client;
+    public string Name { get; }
+    private readonly int _delayMs;
+    private readonly bool _shouldFail;
 
-    public CustomerReportService(FakeCustomerClient client)
+    public ExternalService(string name, int delayMs, bool shouldFail)
     {
-        _client = client;
+        Name = name;
+        _delayMs = delayMs;
+        _shouldFail = shouldFail;
     }
 
-    public async Task<string> BuildReportAsync(int customerId, CancellationToken cancellationToken)
+    public async Task<string> CallAsync(CancellationToken cancellationToken)
     {
-        var customerTask = _client.GetCustomerAsync(customerId, cancellationToken);
-        var ordersTask = _client.GetOrdersAsync(customerId, cancellationToken);
+        await Task.Delay(_delayMs, cancellationToken);
 
-        await Task.WhenAll(customerTask, ordersTask);
+        if (_shouldFail)
+        {
+            throw new InvalidOperationException($"{Name} failed.");
+        }
 
-        var customer = await customerTask;
-        var orders = await ordersTask;
-
-        return $"Customer: {customer.Name}, orders: {orders.Count}, total: {orders.Sum(x => x.Total):C}";
-    }
-}
-
-internal sealed class FakeCustomerClient
-{
-    public async Task<Customer> GetCustomerAsync(int id, CancellationToken cancellationToken)
-    {
-        await Task.Delay(300, cancellationToken);
-        return new Customer(id, "Anna Nowak");
-    }
-
-    public async Task<List<Order>> GetOrdersAsync(int customerId, CancellationToken cancellationToken)
-    {
-        await Task.Delay(400, cancellationToken);
-        return
-        [
-            new Order(1, customerId, 120m),
-            new Order(2, customerId, 250m),
-            new Order(3, customerId, 80m)
-        ];
+        return $"Response from {Name}";
     }
 }
-
-internal sealed record Customer(int Id, string Name);
-internal sealed record Order(int Id, int CustomerId, decimal Total);
