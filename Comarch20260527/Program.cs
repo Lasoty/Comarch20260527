@@ -1,67 +1,66 @@
 ﻿/*
- * Wiele usług z timeoutem i raportem błędów
- *
- * **Cel:** Użyć `Task.WhenAny`, timeoutów i obsługi błędów częściowych. 
- *
- * W praktycznych aplikacjach często odpytywane jest kilka usług zewnętrznych.
- * Nie chcemy, aby błąd jednej usługi zatrzymał cały proces.
- * Nie chcemy też czekać bez końca na najwolniejszą usługę.
- * W tym ćwiczeniu uczestnicy zaimplementują mechanizm, który odpytuje kilka źródeł,
- * przetwarza wyniki w kolejności zakończenia i tworzy raport.
- *
- * 1. Uruchomić wszystkie wywołania współbieżnie.
-   2. Dodać globalny timeout `3 sekundy`.
-   3. Przetwarzać wyniki w kolejności zakończenia.
-   4. Nie przerywać całego procesu przez błąd jednej usługi.
-   5. Wypisać raport: sukcesy, błędy i anulowania/timeouty.
+
+Ćwiczenie: anulowalny import
+Cel: Dodać CancellationToken do procesu importu i poprawnie odróżnić anulowanie od błędu.
+
+Długotrwałe procesy, takie jak import danych, muszą wspierać anulowanie. Użytkownik może przerwać operację, żądanie HTTP może zostać anulowane, a aplikacja może się zamykać. Kod powinien reagować na CancellationToken i kończyć pracę w kontrolowany sposób.
+   
+Zadania dla uczestników
+   1. Dodać CancellationToken do ImportAsync, ValidateAsync i SaveAsync.
+   2. Dodać CancellationTokenSource, który anuluje import po 2 sekundach.
+   3. W pętli importu użyć ThrowIfCancellationRequested.
+   4. Obsłużyć OperationCanceledException osobno od innych wyjątków.
+   5. Upewnić się, że anulowanie nie jest logowane jako awaria biznesowa.
+ 
  */
+
 
 
 internal static class Program
 {
     public static async Task Main()
     {
-        var services = new[]
-        {
-            new ExternalService("Catalog", 700, false),
-            new ExternalService("Pricing", 1200, false),
-            new ExternalService("Availability", 2500, false),
-            new ExternalService("Recommendations", 800, true),
-            new ExternalService("Reviews", 3500, false)
-        };
+        var importer = new Importer();
+        var records = Enumerable.Range(1, 50).Select(id => new ImportRecord(id, $"Value {id}")).ToList();
 
-        Console.WriteLine("Starting calls...");
-
-        foreach (var service in services)
+        try
         {
-            var result = await service.CallAsync(CancellationToken.None);
-            Console.WriteLine($"{service.Name}: {result}");
+            await importer.ImportAsync(records);
+            Console.WriteLine("Import completed.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Import failed: {ex.Message}");
         }
     }
 }
 
-internal sealed class ExternalService
+internal sealed class Importer
 {
-    public string Name { get; }
-    private readonly int _delayMs;
-    private readonly bool _shouldFail;
-
-    public ExternalService(string name, int delayMs, bool shouldFail)
+    public async Task ImportAsync(IReadOnlyList<ImportRecord> records)
     {
-        Name = name;
-        _delayMs = delayMs;
-        _shouldFail = shouldFail;
+        foreach (var record in records)
+        {
+            await ValidateAsync(record);
+            await SaveAsync(record);
+            Console.WriteLine($"Imported record {record.Id}");
+        }
     }
 
-    public async Task<string> CallAsync(CancellationToken cancellationToken)
+    private static async Task ValidateAsync(ImportRecord record)
     {
-        await Task.Delay(_delayMs, cancellationToken);
+        await Task.Delay(80);
 
-        if (_shouldFail)
+        if (string.IsNullOrWhiteSpace(record.Value))
         {
-            throw new InvalidOperationException($"{Name} failed.");
+            throw new InvalidOperationException($"Record {record.Id} is invalid.");
         }
+    }
 
-        return $"Response from {Name}";
+    private static async Task SaveAsync(ImportRecord record)
+    {
+        await Task.Delay(120);
     }
 }
+
+internal sealed record ImportRecord(int Id, string Value);
