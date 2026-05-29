@@ -27,19 +27,48 @@ internal static class Program
             new DataSource("Analytics", 4200, false)
         };
 
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+
         var importer = new DataImporter();
-        await importer.ImportAsync(sources);
+        var report = await importer.ImportAsync(sources, cts.Token);
+
+        Console.WriteLine();
+        Console.WriteLine("Import report:");
+        Console.WriteLine($"Successful sources: {report.Results.Count(x => x.Status == "Success")}");
+        Console.WriteLine($"Failed sources:     {report.Results.Count(x => x.Status == "Failed")}");
+        Console.WriteLine($"Cancelled sources:  {report.Results.Count(x => x.Status == "Cancelled")}");
+        Console.WriteLine($"Total records:      {report.Results.Sum(x => x.RecordsImported)}");
     }
 }
 
 internal sealed class DataImporter
 {
-    public async Task ImportAsync(IEnumerable<DataSource> sources)
+    public async Task<ImportReport> ImportAsync(IEnumerable<DataSource> sources, CancellationToken cancellationToken)
     {
-        foreach (var source in sources)
+        var tasks = sources.Select(source => ImportSourceAsync(source, cancellationToken)).ToList();
+        var results = await Task.WhenAll(tasks);
+        return new ImportReport(results.ToList());
+    }
+
+    private static async Task<SourceImportResult> ImportSourceAsync(
+        DataSource source,
+        CancellationToken cancellationToken)
+    {
+        try
         {
-            var records = await source.LoadAsync(CancellationToken.None);
+            var records = await source.LoadAsync(cancellationToken);
             Console.WriteLine($"{source.Name}: imported {records.Count} records");
+            return new SourceImportResult(source.Name, "Success", records.Count, "OK");
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine($"{source.Name}: cancelled");
+            return new SourceImportResult(source.Name, "Cancelled", 0, "Timeout or cancellation");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"{source.Name}: failed - {ex.Message}");
+            return new SourceImportResult(source.Name, "Failed", 0, ex.Message);
         }
     }
 }
@@ -73,3 +102,5 @@ internal sealed class DataSource
 }
 
 internal sealed record ImportedRecord(string ExternalId, int Value);
+internal sealed record SourceImportResult(string SourceName, string Status, int RecordsImported, string Message);
+internal sealed record ImportReport(List<SourceImportResult> Results);
