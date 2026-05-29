@@ -1,93 +1,57 @@
 ﻿/*
-   Powiązany slajd: Ćwiczenie: równoległe przetwarzanie danych
-   Cel: Porównać wersję sekwencyjną, Parallel.ForEach i Parallel.ForEachAsync oraz wpływ MaxDegreeOfParallelism.
+   Powiązany slajd: Ćwiczenie: bounded Channel
+   Cel: Zbudować bounded channel z wieloma producentami i konsumentami, anulowaniem oraz raportem błędów.
 
    Wprowadzenie dla uczestników
-   Nie każda równoległość przyspiesza aplikację.
-   W tym ćwiczeniu uczestnicy porównają kilka wariantów przetwarzania tej samej kolekcji.
-   Celem jest zobaczenie, że Parallel pasuje do pracy CPU-bound, a Parallel.ForEachAsync może być
-   czytelnym sposobem kontrolowania współbieżności przy operacjach asynchronicznych.
+   Channel<T> umożliwia asynchroniczne przekazywanie danych między producentami i konsumentami.
+   Wersja bounded ogranicza pojemność kanału i wprowadza backpressure. To chroni aplikację przed
+   niekontrolowanym wzrostem pamięci, gdy producent generuje dane szybciej niż konsumenci je przetwarzają.
 
-   
-  
-   3. Dodać `ParallelOptions` z `MaxDegreeOfParallelism`.
-   4. Porównać wyniki dla limitów `2`, `4`, `Environment.ProcessorCount`.
-   5. Wyjaśnić, kiedy równoległość może zaszkodzić.
+   Zadania dla uczestników
 
+   1. Zmienić kanał na bounded o pojemności `10`.
+   2. Dodać trzech producentów.
+   3. Dodać czterech konsumentów.
+   4. Dodać `CancellationTokenSource` z timeoutem `10 sekund`.
+   5. Dodać licznik przetworzonych zadań i licznik błędów.
+   6. Upewnić się, że `Writer.Complete()` jest wywołany po zakończeniu wszystkich producentów.
 */
 
-using System.Collections.Concurrent;
-using System.Diagnostics;
+using System.Threading.Channels;
 
 internal static class Program
 {
     public static async Task Main()
     {
-        var numbers = Enumerable.Range(35_000, 20_000).ToArray();
+        var channel = Channel.CreateUnbounded<Job>();
 
-        Measure("Sequential CPU", () =>
+        var producer = Task.Run(async () =>
         {
-            var result = numbers.Select(CpuIntensiveWork).ToList();
-            Console.WriteLine($"Result: {result.Count}");
-        });
-
-        Measure("Parallel.ForEach CPU", () =>
-        {
-            var result = new ConcurrentBag<int>();
-            var options = new ParallelOptions
+            for (var i = 1; i <= 50; i++)
             {
-                MaxDegreeOfParallelism = Environment.ProcessorCount
-            };
-
-            Parallel.ForEach(numbers, options, number =>
-            {
-                result.Add(CpuIntensiveWork(number));
-            });
-        });
-
-        await MeasureAsync($"Parallel.ForEachAsync", async () =>
-        {
-            var result = new ConcurrentBag<int>();
-            var options = new ParallelOptions
-            {
-                MaxDegreeOfParallelism = Environment.ProcessorCount
-            };
-
-            await Parallel.ForEachAsync(numbers, options, async (number, token) =>
-            {
-                await Task.Delay(1, token);
-                result.Add(CpuIntensiveWork(number));
-            });
-        });
-    }
-
-    public static int CpuIntensiveWork(int value)
-    {
-        var result = 0;
-        for (int i = 2; i < 250; i++)
-        {
-            if (value % i == 0)
-            {
-                result++;
+                await channel.Writer.WriteAsync(new Job(i));
+                Console.WriteLine($"Produced {i}");
             }
-        }
 
-        return result;
+            channel.Writer.Complete();
+        });
+
+        var consumer = Task.Run(async () =>
+        {
+            await foreach (var job in channel.Reader.ReadAllAsync())
+            {
+                await ProcessAsync(job);
+                Console.WriteLine($"Processed {job.Id}");
+            }
+        });
+
+        await Task.WhenAll(producer, consumer);
     }
 
-    private static void Measure(string name, Action action)
+    private static async Task ProcessAsync(Job job)
     {
-        Stopwatch stopwatch = Stopwatch.StartNew();
-        action();
-        Console.WriteLine($"{name}: {stopwatch.ElapsedMilliseconds} ms");
-        Console.WriteLine();
-    }
-
-    private static async Task MeasureAsync(string name, Func<Task> action)
-    {
-        Stopwatch stopwatch = Stopwatch.StartNew();
-        await action();
-        Console.WriteLine($"{name}: {stopwatch.ElapsedMilliseconds} ms");
-        Console.WriteLine();
+        await Task.Delay(Random.Shared.Next(40, 120));
     }
 }
+
+internal sealed record Job(int Id);
